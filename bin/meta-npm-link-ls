@@ -52,17 +52,22 @@ function main() {
     const result = resolveSymLink(dir);
 
     if (result) {
+      // it seems the dependencies have their source and target inverted.
       const { sourceFolder, targetFolder } = dep;
       const source = slash(path.relative(rootDir, sourceFolder));
       const target = slash(path.relative(rootDir, targetFolder));
-      if (source in symlinks) {
-        symlinks[source] = [...symlinks[source], target]
+      // if (source in symlinks) {
+      //   symlinks[source] = [...symlinks[source], target]
+      // } else {
+      //   symlinks[source] = [target]
+      // }
+      if (target in symlinks) {
+        symlinks[target] = [...symlinks[target], source]
       } else {
-        symlinks[source] = [target]
+        symlinks[target] = [source]
       }
     }
-  })
-
+  });
 
   const srcWidth = Object.keys(symlinks).reduce((max, s) => Math.max(max, s.length), 0);
   Object.keys(symlinks).sort().forEach((src) => {
