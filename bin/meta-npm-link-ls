@@ -45,7 +45,7 @@ function main() {
 
   const dependencies = getPackageDependencies(packages);
 
-  console.log(`\nlinked child projects globally`);
+  console.log(`\nLinked child projects (intra-meta-repo dependency listing)\n`);
   const symlinks = {}
   dependencies.forEach((dep) => {
     const dir = `${dep.targetFolder}/node_modules/${dep.source}`;
@@ -72,7 +72,7 @@ function main() {
   const srcWidth = Object.keys(symlinks).reduce((max, s) => Math.max(max, s.length), 0);
   Object.keys(symlinks).sort().forEach((src) => {
     symlinks[src].sort().forEach((tgt) => {
-      console.log(`${src.padEnd(srcWidth, ' ')} -> ${tgt}`)
+      console.log(`${src.padEnd(srcWidth, ' ')} <- ${tgt}`)
     })
   })
 }
