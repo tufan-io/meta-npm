@@ -7,6 +7,8 @@ const path = require('path');
 const slash = require('slash');
 const _ = require('lodash');
 
+// a bit dicey, but getMetaFile also assumes process.cwd(), so we'll let it be for now.
+const rootDir = process.cwd();
 
 if (process.argv[2] === '--help') {
   return console.log(`\n  usage:\n\n    meta npm link-ls\n`);
@@ -14,11 +16,8 @@ if (process.argv[2] === '--help') {
   main();
 }
 
+
 function main() {
-
-  // a bit dicey, but getMetaFile also assumes process.cwd(), so we'll let it be for now.
-  const rootDir = process.cwd();
-
   var meta = getMetaFile();
   const metaLocation = path.join(process.cwd(), '.meta');
   const metaPackageJson = require(path.join(metaLocation, '..', 'package.json'));
@@ -46,37 +45,28 @@ function main() {
 
   const dependencies = getPackageDependencies(packages);
 
-  let uniqueFoldersToLink = _.union(
-    dependencies.map(d => {
-      return d.sourceFolder;
-    })
-  );
-
   console.log(`\nlinked child projects globally`);
-  // console.log(dependencies);
-  const links = {}
-  const l2 = {}
+  const symlinks = {}
   dependencies.forEach((dep) => {
     const dir = `${dep.targetFolder}/node_modules/${dep.source}`;
     const result = resolveSymLink(dir);
 
     if (result) {
-      const { sourceFolder, via, targetFolder } = dep;
+      const { sourceFolder, targetFolder } = dep;
       const source = slash(path.relative(rootDir, sourceFolder));
       const target = slash(path.relative(rootDir, targetFolder));
-      if (source in l2) {
-        l2[source] = [...l2[source], target]
+      if (source in symlinks) {
+        symlinks[source] = [...symlinks[source], target]
       } else {
-        l2[source] = [target]
+        symlinks[source] = [target]
       }
-      //    links[source] = target;
     }
   })
 
 
-  const srcWidth = Object.keys(l2).reduce((max, s) => Math.max(max, s.length), 0);
-  Object.keys(l2).sort().forEach((src) => {
-    l2[src].sort().forEach((tgt) => {
+  const srcWidth = Object.keys(symlinks).reduce((max, s) => Math.max(max, s.length), 0);
+  Object.keys(symlinks).sort().forEach((src) => {
+    symlinks[src].sort().forEach((tgt) => {
       console.log(`${src.padEnd(srcWidth, ' ')} -> ${tgt}`)
     })
   })
