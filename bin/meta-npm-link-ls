@@ -1,0 +1,99 @@
+#!/usr/bin/env node
+
+const fs = require('fs');
+const getMetaFile = require('get-meta-file');
+const getPackageDependencies = require('../lib/getPackageDependencies');
+const path = require('path');
+const slash = require('slash');
+const _ = require('lodash');
+
+
+if (process.argv[2] === '--help') {
+  return console.log(`\n  usage:\n\n    meta npm link-ls\n`);
+} else {
+  main();
+}
+
+function main() {
+
+  // a bit dicey, but getMetaFile also assumes process.cwd(), so we'll let it be for now.
+  const rootDir = process.cwd();
+
+  var meta = getMetaFile();
+  const metaLocation = path.join(process.cwd(), '.meta');
+  const metaPackageJson = require(path.join(metaLocation, '..', 'package.json'));
+  const packages = [];
+  const projects = meta.projects;
+
+  _.forEach(Object.keys(projects), folder => {
+    const childPackageJson = require(path.join(metaLocation, '..', folder, 'package.json'));
+
+    packages.push({
+      name: childPackageJson.name,
+      folder: path.join(metaLocation, '..', folder),
+      dependencies: childPackageJson.dependencies,
+      devDependencies: childPackageJson.devDependencies,
+    });
+  });
+
+  packages.push({
+    name: metaPackageJson.name,
+    folder: path.join(metaLocation, '..'),
+    dependencies: metaPackageJson.dependencies,
+    devDependencies: metaPackageJson.devDependencies,
+  });
+
+
+  const dependencies = getPackageDependencies(packages);
+
+  let uniqueFoldersToLink = _.union(
+    dependencies.map(d => {
+      return d.sourceFolder;
+    })
+  );
+
+  console.log(`\nlinked child projects globally`);
+  // console.log(dependencies);
+  const links = {}
+  const l2 = {}
+  dependencies.forEach((dep) => {
+    const dir = `${dep.targetFolder}/node_modules/${dep.source}`;
+    const result = resolveSymLink(dir);
+
+    if (result) {
+      const { sourceFolder, via, targetFolder } = dep;
+      const source = slash(path.relative(rootDir, sourceFolder));
+      const target = slash(path.relative(rootDir, targetFolder));
+      if (source in l2) {
+        l2[source] = [...l2[source], target]
+      } else {
+        l2[source] = [target]
+      }
+      //    links[source] = target;
+    }
+  })
+
+
+  const srcWidth = Object.keys(l2).reduce((max, s) => Math.max(max, s.length), 0);
+  Object.keys(l2).sort().forEach((src) => {
+    l2[src].sort().forEach((tgt) => {
+      console.log(`${src.padEnd(srcWidth, ' ')} -> ${tgt}`)
+    })
+  })
+}
+
+function resolveSymLink(dir) {
+  const stat1 = fs.lstatSync(dir);
+  if (stat1.isSymbolicLink()) {
+    const dir2 = fs.readlinkSync(dir);
+    const stat2 = fs.lstatSync(dir2);
+    if (stat2.isSymbolicLink()) {
+      const target = fs.readlinkSync(dir2);
+      return {
+        source: slash(path.relative(rootDir, dir)),
+        via: slash(dir2).replace(".*/node_modules", "[GLOBAL]"),
+        target: slash(path.relative(rootDir, target))
+      }
+    }
+  }
+}

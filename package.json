@@ -8,6 +8,7 @@
     "meta-npm-clean": "./bin/meta-npm-clean",
     "meta-npm-install": "./bin/meta-npm-install",
     "meta-npm-link": "./bin/meta-npm-link",
+    "meta-npm-link-ls": "./bin/meta-npm-link-ls",
     "meta-npm-outdated": "./bin/meta-npm-outdated",
     "meta-npm-publish": "./bin/meta-npm-publish",
     "meta-npm-run": "./bin/meta-npm-run",
@@ -55,6 +56,7 @@
     "loop": "^3.1.1",
     "meta-exec": "^1.0.0",
     "meta-loop": "^1.0.0",
+    "slash": "^3.0.0",
     "symlink-meta-dependencies": "^1.0.0"
   },
   "devDependencies": {
