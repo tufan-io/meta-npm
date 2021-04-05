@@ -1,0 +1,116 @@
+#!/usr/bin/env node
+
+/**
+ * npm local-link creates intra meta repo links. It avoids using `npm link`, which 
+ * is difficult to manage - especially in the presence of more than one meta-repo
+ * which contain the same git-repo(s).
+ * 
+ * Since `npm` does not provide for local-links, we have to implement that functionality
+ * here. 
+ * 
+ * - `getPackageDependencies` provides all intra-connected dependencies.
+ * - We use these to establish the synbolic links.
+ *   - if found, delete previously installed concrete version of the dependency
+ *   - if a previous Symlink is discovered,
+ *      - if it points to the same destination, keep it.
+ *      - if not, return.
+ *   - create a symblink from target to destination. 
+ * - repeat this for each intra-dependency detected
+ */
+const fs = require('fs');
+const getMetaFile = require('get-meta-file');
+const getPackageDependencies = require('../lib/getPackageDependencies');
+const path = require('path');
+const slash = require('slash');
+const _ = require('lodash');
+const debug = require('debug')('meta-npm')
+
+// a bit dicey, but getMetaFile also assumes process.cwd(), so we'll let it be for now.
+const rootDir = process.cwd();
+
+if (process.argv[2] === '--help') {
+  return console.log(`\n  usage:\n\n    meta npm link-local\n`);
+} else {
+  main();
+}
+
+
+function main() {
+  var meta = getMetaFile();
+  const metaLocation = path.join(process.cwd(), '.meta');
+  const metaPackageJson = require(path.join(metaLocation, '..', 'package.json'));
+  const packages = [];
+  const projects = meta.projects;
+
+  _.forEach(Object.keys(projects), folder => {
+    const childPackageJson = require(path.join(metaLocation, '..', folder, 'package.json'));
+
+    packages.push({
+      name: childPackageJson.name,
+      folder: path.join(metaLocation, '..', folder),
+      dependencies: childPackageJson.dependencies,
+      devDependencies: childPackageJson.devDependencies,
+    });
+  });
+
+  packages.push({
+    name: metaPackageJson.name,
+    folder: path.join(metaLocation, '..'),
+    dependencies: metaPackageJson.dependencies,
+    devDependencies: metaPackageJson.devDependencies,
+  });
+
+  const dependencies = getPackageDependencies(packages);
+  dependencies.sort((d1, d2) => d1.target < d2.target ? 0 : -1).forEach(({ targetFolder, source, sourceFolder }) => {
+    const tgt = `${targetFolder}/node_modules/${source}`;
+    const dst = sourceFolder
+    const state = createSymlink(tgt, dst);
+    console.log(`link: (${state}) ${slash(path.relative(process.cwd(), targetFolder))} (${source}) -> ${slash(path.relative(process.cwd(), dst))}`)
+  })
+}
+
+
+function createSymlink(target, destination) {
+  destination = slash(path.resolve(destination));
+  target = slash(path.resolve(target));
+  const exists = fs.existsSync(target);
+
+  debug({ target, destination, exists });
+  if (exists) {
+    const stat = fs.statSync(target);
+    const lstat = fs.lstatSync(target);
+    const isSymlink = lstat.isSymbolicLink();
+    const isDir = stat.isDirectory();
+    debug({ isSymlink, isDir });
+    if (isDir) {
+      if (isSymlink) {
+        // check to ensure the destination of symbolic link is identical to the one being requested
+        const currentDestination = slash(path.resolve(fs.readlinkSync(target)));
+        debug({ currentDestination });
+        if (currentDestination === destination) {
+          debug("keep existing");
+          // we leave good enough alone. Nothing to do here.
+          return "exists";
+        }
+        debug("unlinking symlink");
+        // different destination. Remove
+        fs.unlinkSync(target);
+      } else {
+        debug("deleting dir");
+        // remove the directory, recursively
+        fs.rmSync(target, { recursive: true, force: true })
+      }
+    }
+  }
+  debug("creating symlink");
+  try {
+    fs.symlinkSync(destination, target, 'junction');
+    return "created";
+  } catch (err) {
+    if (err.code === 'ENOENT') {
+      return `ERROR (${err.code})`
+    } else {
+      throw err
+    }
+  }
+}

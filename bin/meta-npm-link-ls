@@ -2,6 +2,7 @@
 
 const fs = require('fs');
 const getMetaFile = require('get-meta-file');
+const debug = require("debug")("npm-meta");
 const getPackageDependencies = require('../lib/getPackageDependencies');
 const path = require('path');
 const slash = require('slash');
@@ -47,25 +48,23 @@ function main() {
 
   console.log(`\nLinked child projects (intra-meta-repo dependency listing)\n`);
   const symlinks = {}
+  const missing = [];
   dependencies.forEach((dep) => {
+    const { sourceFolder, targetFolder } = dep;
+    const source = slash(path.relative(rootDir, sourceFolder));
+    const target = slash(path.relative(rootDir, targetFolder));
+
     const dir = `${dep.targetFolder}/node_modules/${dep.source}`;
     const result = resolveSymLink(dir);
 
     if (result) {
-      // it seems the dependencies have their source and target inverted.
-      const { sourceFolder, targetFolder } = dep;
-      const source = slash(path.relative(rootDir, sourceFolder));
-      const target = slash(path.relative(rootDir, targetFolder));
-      // if (source in symlinks) {
-      //   symlinks[source] = [...symlinks[source], target]
-      // } else {
-      //   symlinks[source] = [target]
-      // }
       if (target in symlinks) {
         symlinks[target] = [...symlinks[target], source]
       } else {
         symlinks[target] = [source]
       }
+    } else {
+      missing.push(`missing ${target} (${dep.source})`);
     }
   });
 
@@ -75,20 +74,24 @@ function main() {
       console.log(`${src.padEnd(srcWidth, ' ')} <- ${tgt}`)
     })
   })
+  missing.forEach((m) => console.log(m));
 }
 
 function resolveSymLink(dir) {
-  const stat1 = fs.lstatSync(dir);
-  if (stat1.isSymbolicLink()) {
-    const dir2 = fs.readlinkSync(dir);
-    const stat2 = fs.lstatSync(dir2);
-    if (stat2.isSymbolicLink()) {
-      const target = fs.readlinkSync(dir2);
-      return {
-        source: slash(path.relative(rootDir, dir)),
-        via: slash(dir2).replace(".*/node_modules", "[GLOBAL]"),
-        target: slash(path.relative(rootDir, target))
-      }
+  const exists = fs.existsSync(dir);
+  if (!exists) {
+    debug(`missing ${dir}`);
+    return;
+  }
+  const lstat1 = fs.lstatSync(dir);
+  if (lstat1.isSymbolicLink()) {
+    const destination = fs.readlinkSync(dir);
+    const source = slash(path.relative(rootDir, dir));
+    const target = slash(path.relative(rootDir, destination));
+    debug(`${source} -> ${target}`);
+    return {
+      source,
+      target
     }
   }
 }

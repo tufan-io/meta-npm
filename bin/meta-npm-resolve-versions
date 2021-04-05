@@ -1,0 +1,132 @@
+#!/usr/bin/env node
+
+/**
+ * When a `meta` repo is updated, it causes a requirement to create a cascade of version updates.
+ * For complex dependency trees, this can involve lot of steps/button-clicks, even if a CI bot is
+ * used for the purpose.
+ * 
+ * A meta repo contains the intra-dpeendency tree. Once all changes are made, it makes a lot of sense
+ * to test these changes on the developer machine, bump versions for individual packages as needed, 
+ * and then, update all affected package.json files.
+ *
+ * This involves computing not just the intra-dependencies, but also a dependency-tree. 
+ */
+const fs = require('fs');
+const getMetaFile = require('get-meta-file');
+const toposort = require('toposort');
+const semver = require("semver");
+const getPackageDependencies = require('../lib/getPackageDependencies');
+const path = require('path');
+const slash = require('slash');
+const _ = require('lodash');
+const chalk = require('chalk');
+const debug = require('debug')('meta-npm');
+const cp = require("child_process");
+
+// a bit dicey, but getMetaFile also assumes process.cwd(), so we'll let it be for now.
+const rootDir = process.cwd();
+
+if (process.argv[2] === '--help') {
+  return console.log(`\n  usage:\n\n    meta npm link-ls\n`);
+} else {
+  main();
+}
+
+function relPath(dir) {
+  return slash(path.relative(rootDir, dir));
+}
+
+function main() {
+  var meta = getMetaFile();
+  const metaLocation = path.join(process.cwd(), '.meta');
+  const metaPackageJson = require(path.join(metaLocation, '..', 'package.json'));
+  const packages = {};
+  const projects = meta.projects;
+
+  _.forEach(Object.keys(projects), folder => {
+    const childPackageJson = require(path.join(metaLocation, '..', folder, 'package.json'));
+
+    packages[childPackageJson.name] = {
+      name: childPackageJson.name,
+      folder: path.join(metaLocation, '..', folder),
+      dependencies: childPackageJson.dependencies,
+      devDependencies: childPackageJson.devDependencies,
+      version: childPackageJson.version,
+      pkgJson: childPackageJson,
+    };
+  });
+
+  packages[metaPackageJson.name] = {
+    name: metaPackageJson.name,
+    folder: path.join(metaLocation, '..'),
+    dependencies: metaPackageJson.dependencies,
+    devDependencies: metaPackageJson.devDependencies,
+    version: metaPackageJson.version,
+    pkgJson: metaPackageJson,
+  };
+
+  // get the dependencies
+  const dependencies = getPackageDependencies(Object.values(packages));
+  debug(dependencies.map(({ pkgJson, ...dep }) => dep))
+  // update linked versions
+  const updates = {};
+  dependencies.forEach((dep) => {
+    const { source, target, nextVersion: _nextVersion, currVersion: _currVersion, dev } = dep
+    const { pkgJson, ...rest } = dep;
+    const match = _currVersion.trim().match(/(<=|=|>=|\^|~)(.*)/);
+    const comparator = match ? match[1] : '';
+    const currVersion = match ? match[2] : _currVersion;
+    const color = semver.lt(currVersion, _nextVersion)
+      ? chalk.green
+      : semver.gt(currVersion, _nextVersion)
+        ? chalk.red
+        : chalk.dim.blue
+    const nextVersion = `${comparator}${_nextVersion}`;
+    // updates tracks the changes made, so we can provide feedback to the user.
+    if (_nextVersion !== currVersion) {
+      if (!Object.keys(updates).includes(target)) {
+        updates[target] = [];
+      }
+      updates[target].push({ source, nextVersion, currVersion: _currVersion, color })
+    }
+    if (dev) {
+      packages[target].devDependencies[source] = `${comparator}${nextVersion}`;
+    } else {
+      packages[target].dependencies[source] = `${comparator}${nextVersion}`;
+    }
+  });
+
+  // all updates have been applied. We can now save the modified `package.json`s
+  // let's do so in a topologically sorted order. If we traverse this list top to bottom,
+  // it'll require the fewest loops.
+
+  const edges = dependencies.map(({ source, target }) => {
+    return [source, target]
+  })
+  const nodes = Object.keys(packages);
+  const sorted = toposort.array(nodes, edges).filter((n) => !!n);
+
+  sorted.forEach((name, idx) => {
+    const package = packages[name];
+    if (Object.keys(updates).includes(name)) {
+      const pkgJson = package.pkgJson;
+      // fs.writeFileSync(`${folder}/package.json`, JSON.stringify(pkgJson, null, 2));
+      const pkgUpdates = updates[name].map(({ source, nextVersion, currVersion, color }) =>
+        color(`      ${source}: ${currVersion} => ${nextVersion}`)).join("\n");
+      const leader = `${chalk.bold.green(`${idx}. ${chalk.underline(name)}`)} ${chalk.dim.green('(updated):')}`;
+      console.log(`${leader}\n${pkgUpdates}`)
+    } else {
+      const hasUpdates = cp.execSync("git status --porcelain", { cwd: process.cwd(), encoding: 'utf8' });
+      if (hasUpdates) {
+        console.log(chalk.bold.green(`${idx}. ${chalk.underline(name)} (${chalk.dim(updated)})`))
+      } else {
+        console.log(chalk.dim.cyan(`${idx}. ${chalk.underline(name)} (NO updates)`))
+      }
+    }
+  })
+  // sorted.forEach((pkgName) => {
+  //   const { pkgJson, folder } = packages[pkgName];
+  //   // const modified =
+  // })
+
+}

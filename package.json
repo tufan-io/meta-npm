@@ -56,8 +56,10 @@
     "loop": "^3.1.1",
     "meta-exec": "^1.0.0",
     "meta-loop": "^1.0.0",
+    "semver": "^7.3.5",
     "slash": "^3.0.0",
-    "symlink-meta-dependencies": "^1.0.0"
+    "symlink-meta-dependencies": "^1.0.0",
+    "toposort": "^2.0.2"
   },
   "devDependencies": {
     "@commitlint/cli": "8.0.0",
