@@ -43,6 +43,15 @@ function main() {
   const packages = {};
   const projects = meta.projects;
 
+  packages[metaPackageJson.name] = {
+    name: metaPackageJson.name,
+    folder: path.join(metaLocation, '..'),
+    dependencies: metaPackageJson.dependencies,
+    devDependencies: metaPackageJson.devDependencies,
+    version: metaPackageJson.version,
+    pkgJson: metaPackageJson,
+  };
+
   _.forEach(Object.keys(projects), folder => {
     const childPackageJson = require(path.join(metaLocation, '..', folder, 'package.json'));
 
@@ -56,15 +65,6 @@ function main() {
     };
   });
 
-  packages[metaPackageJson.name] = {
-    name: metaPackageJson.name,
-    folder: path.join(metaLocation, '..'),
-    dependencies: metaPackageJson.dependencies,
-    devDependencies: metaPackageJson.devDependencies,
-    version: metaPackageJson.version,
-    pkgJson: metaPackageJson,
-  };
-
   // get the dependencies
   const dependencies = getPackageDependencies(Object.values(packages));
   debug(dependencies.map(({ pkgJson, ...dep }) => dep))
@@ -76,23 +76,24 @@ function main() {
     const match = _currVersion.trim().match(/(<=|=|>=|\^|~)(.*)/);
     const comparator = match ? match[1] : '';
     const currVersion = match ? match[2] : _currVersion;
-    const color = semver.lt(currVersion, _nextVersion)
-      ? chalk.green
+    const direction = semver.lt(currVersion, _nextVersion)
+      ? "upgrade"
       : semver.gt(currVersion, _nextVersion)
-        ? chalk.red
-        : chalk.dim.blue
-    const nextVersion = `${comparator}${_nextVersion}`;
+        ? "downgrade"
+        : "no-change"
     // updates tracks the changes made, so we can provide feedback to the user.
     if (_nextVersion !== currVersion) {
+      const nextVersion = `${comparator}${_nextVersion}`;
+      if (dev) {
+        packages[target].devDependencies[source] = nextVersion;
+      } else {
+        packages[target].dependencies[source] = nextVersion;
+      }
+
       if (!Object.keys(updates).includes(target)) {
         updates[target] = [];
       }
-      updates[target].push({ source, nextVersion, currVersion: _currVersion, color })
-    }
-    if (dev) {
-      packages[target].devDependencies[source] = `${comparator}${nextVersion}`;
-    } else {
-      packages[target].dependencies[source] = `${comparator}${nextVersion}`;
+      updates[target].push({ source, nextVersion, currVersion: _currVersion, direction })
     }
   });
 
@@ -108,25 +109,50 @@ function main() {
 
   sorted.forEach((name, idx) => {
     const package = packages[name];
-    if (Object.keys(updates).includes(name)) {
-      const pkgJson = package.pkgJson;
-      // fs.writeFileSync(`${folder}/package.json`, JSON.stringify(pkgJson, null, 2));
-      const pkgUpdates = updates[name].map(({ source, nextVersion, currVersion, color }) =>
-        color(`      ${source}: ${currVersion} => ${nextVersion}`)).join("\n");
-      const leader = `${chalk.bold.green(`${idx}. ${chalk.underline(name)}`)} ${chalk.dim.green('(updated):')}`;
-      console.log(`${leader}\n${pkgUpdates}`)
+    const folder = package.folder;
+    const execOptions = { cwd: folder, encoding: 'utf8' };
+    const branch = cp.execSync(`git rev-parse --abbrev-ref HEAD`, execOptions)
+    // check remotes for any changes (restrict to our branch)
+    cp.spawnSync(`git`, [`fetch`, `origin`, branch], execOptions);
+    // now when we execute a status, we could be ahead or behind remote. 
+    const status = cp.execSync("git status", execOptions);
+    const depUpdates = Object.keys(updates).includes(name);
+    const localUpdates = depUpdates || !!status.match(/Changes not staged for commit|Changes to be committed/);
+    const readyToPush = !depUpdates && !!status.match(/Your branch is ahead of/) && !!status.match(/nothing to commit, working tree clean/)
+    const remoteUpdates = !!status.match(/Your branch is behind/);
+    const update = (!localUpdates && !remoteUpdates && !readyToPush)
+      ? '(NO updates)'
+      : !remoteUpdates && readyToPush
+        ? '(ready to publish)'
+        : (remoteUpdates && !localUpdates)
+          ? '(remote updates)'
+          : (remoteUpdates && localUpdates)
+            ? '(remote+local updates)'
+            : depUpdates
+              ? '(dependency updates)'
+              : '(local updates)'
+    // console.log(`dep:${depUpdates} local:${localUpdates} remote:${remoteUpdates} push:${readyToPush} update:${update}`);
+    debug({ depUpdates, localUpdates, remoteUpdates, readyToPush, update });
+    if (update === "(NO updates)") {
+      console.log(chalk.green(`${idx}. ${chalk.underline(name)} ${chalk.dim(update)}`))
+    } else if (update === "(ready to publish)") {
+      console.log(chalk.yellow(`${idx}. ${chalk.underline(name)} ${chalk.dim(update)}`))
     } else {
-      const hasUpdates = cp.execSync("git status --porcelain", { cwd: process.cwd(), encoding: 'utf8' });
-      if (hasUpdates) {
-        console.log(chalk.bold.green(`${idx}. ${chalk.underline(name)} (${chalk.dim(updated)})`))
-      } else {
-        console.log(chalk.dim.cyan(`${idx}. ${chalk.underline(name)} (NO updates)`))
-      }
+      console.log(chalk.red(`${idx}. ${chalk.underline(name)} ${chalk.dim(update)}`))
+    }
+
+    if (depUpdates) {
+      const pkgJson = package.pkgJson;
+      fs.writeFileSync(`${folder}/package.json`, JSON.stringify(pkgJson, null, 2));
+      const pkgUpdates = updates[name].map(({ source, nextVersion, currVersion, direction }) => {
+        const verStr = chalk.dim(`${currVersion} -> ${nextVersion}`)
+        return direction === 'upgrade'
+          ? chalk.red(`      ${source}: ${verStr} ${chalk.dim(`(up)`)}`)
+          : direction === 'downgrade'
+            ? chalk.redBright(`      ${source}: ${verStr} ${chalk.dim(`(down)`)}`)
+            : chalk.green(`      ${source}: ${verStr}`);
+      }).join("\n");
+      console.log(pkgUpdates)
     }
   })
-  // sorted.forEach((pkgName) => {
-  //   const { pkgJson, folder } = packages[pkgName];
-  //   // const modified =
-  // })
-
 }
