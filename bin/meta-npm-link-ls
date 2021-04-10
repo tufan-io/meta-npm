@@ -6,6 +6,7 @@ const debug = require("debug")("npm-meta");
 const getPackageDependencies = require('../lib/getPackageDependencies');
 const path = require('path');
 const slash = require('slash');
+const chalk = require("chalk");
 const _ = require('lodash');
 
 // a bit dicey, but getMetaFile also assumes process.cwd(), so we'll let it be for now.
@@ -46,7 +47,6 @@ function main(whiteList) {
 
 
   const dependencies = getPackageDependencies(packages);
-  console.log(dependencies);
 
   console.log(`\nLinked child projects (intra-meta-repo dependency listing)\n`);
   const symlinks = {}
@@ -81,7 +81,7 @@ function main(whiteList) {
       console.log(`${src.padEnd(srcWidth, ' ')} <- ${tgt}`)
     })
   })
-  missing.forEach((m) => console.log(m));
+  missing.forEach((m) => console.log(chalk.magenta(m)));
 }
 
 function resolveSymLink(dir) {
