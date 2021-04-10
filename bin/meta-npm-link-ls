@@ -12,13 +12,14 @@ const _ = require('lodash');
 const rootDir = process.cwd();
 
 if (process.argv[2] === '--help') {
-  return console.log(`\n  usage:\n\n    meta npm link-ls\n`);
-} else {
-  main();
+  return console.log(`\n  usage:\n\n    meta npm link-ls comma,separated,modules,to,filter\n`);
 }
 
+main(!!process.argv[2] ? process.argv[2].split(',') : undefined);
 
-function main() {
+
+
+function main(whiteList) {
   var meta = getMetaFile();
   const metaLocation = path.join(process.cwd(), '.meta');
   const metaPackageJson = require(path.join(metaLocation, '..', 'package.json'));
@@ -45,14 +46,20 @@ function main() {
 
 
   const dependencies = getPackageDependencies(packages);
+  console.log(dependencies);
 
   console.log(`\nLinked child projects (intra-meta-repo dependency listing)\n`);
   const symlinks = {}
   const missing = [];
   dependencies.forEach((dep) => {
-    const { sourceFolder, targetFolder } = dep;
+    const { sourceFolder, targetFolder, source: sourceName, target: targetName } = dep;
     const source = slash(path.relative(rootDir, sourceFolder));
     const target = slash(path.relative(rootDir, targetFolder));
+
+    if (whiteList && !whiteList.includes(sourceName) && !whiteList.includes(targetName)) {
+      // user asked to skip dependency list.
+      return;
+    }
 
     const dir = `${dep.targetFolder}/node_modules/${dep.source}`;
     const result = resolveSymLink(dir);
