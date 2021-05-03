@@ -67,33 +67,66 @@ function main() {
 
   // get the dependencies
   const dependencies = getPackageDependencies(Object.values(packages));
-  debug(dependencies.map(({ pkgJson, ...dep }) => dep))
+  debug(dependencies.map(({ pkgJson, ...dep }) => dep));
   // update linked versions
   const updates = {};
   dependencies.forEach((dep) => {
-    const { source, target, nextVersion: _nextVersion, currVersion: _currVersion, dev } = dep
+    const { source, target, nextVersion: _nextVersion, currVersion: _currVersion, dev, transitive } = dep;
     const { pkgJson, ...rest } = dep;
     const match = _currVersion.trim().match(/(<=|=|>=|\^|~)(.*)/);
     const comparator = match ? match[1] : '';
     const currVersion = match ? match[2] : _currVersion;
+    if (currVersion[0].match(/[a-z]/)) {
+      if (!Object.keys(updates).includes(target)) {
+        updates[target] = [];
+      }
+      updates[target].push({ source, nextVersion: _nextVersion, currVersion: _currVersion, direction: "no-change" });
+      return;
+    }
     const direction = semver.lt(currVersion, _nextVersion)
       ? "upgrade"
       : semver.gt(currVersion, _nextVersion)
         ? "downgrade"
         : "no-change"
     // updates tracks the changes made, so we can provide feedback to the user.
-    if (_nextVersion !== currVersion) {
-      const nextVersion = `${comparator}${_nextVersion}`;
-      if (dev) {
-        packages[target].devDependencies[source] = nextVersion;
-      } else {
-        packages[target].dependencies[source] = nextVersion;
-      }
+    try {
+      if ((!transitive && _nextVersion !== currVersion) ||
+        !!dep.sourceFolder.match(/node_modules/)) {
+        const nextVersion = `${comparator}${_nextVersion}`;
+        if (dev) {
+          packages[target].devDependencies[source] = nextVersion;
+        } else {
+          packages[target].dependencies[source] = nextVersion;
+        }
 
-      if (!Object.keys(updates).includes(target)) {
-        updates[target] = [];
+        if (!Object.keys(updates).includes(target)) {
+          updates[target] = [];
+        }
+        updates[target].push({ source, nextVersion, currVersion: _currVersion, direction });
+        return;
+      } else {
+        const folder = dep.sourceFolder;
+        const execOptions = { cwd: folder, encoding: 'utf8' };
+        const branch = cp.execSync(`git rev-parse --abbrev-ref HEAD`, execOptions);
+        // check remotes for any changes (restrict to our branch)
+        cp.spawnSync(`git`, [`fetch`, `origin`, branch], execOptions);
+        // now when we execute a status, we could be ahead or behind remote. 
+        const status = cp.execSync("git status", execOptions);
+        // there are local modifications, but the version hasn't yet been updated. 
+        const unversionedChanges = !!status.match(/Changes not staged for commit|Untracked files|Changes to be committed|Your branch is ahead of|Your branch is behind/);
+        if (unversionedChanges) {
+          // the version are still identical. We cannot devine the next version. It is something the
+          // developer has to commit. But we did detect changes - remote, local, committed or not.
+          // This will impact dependents. So we'll track and provide feedback. 
+          if (!Object.keys(updates).includes(target)) {
+            updates[target] = [];
+          }
+          updates[target].push({ source, nextVersion: currVersion, currVersion, direction: "unversioned" });
+          return;
+        }
       }
-      updates[target].push({ source, nextVersion, currVersion: _currVersion, direction })
+    } catch (err) {
+      console.log(JSON.stringify({ dep, err }, null, 2));
     }
   });
 
@@ -150,7 +183,9 @@ function main() {
           ? chalk.red(`      ${source}: ${verStr} ${chalk.dim(`(up)`)}`)
           : direction === 'downgrade'
             ? chalk.redBright(`      ${source}: ${verStr} ${chalk.dim(`(down)`)}`)
-            : chalk.green(`      ${source}: ${verStr}`);
+            : direction === "unversioned"
+              ? chalk.magenta(`      ${source}: ${verStr} (pending new version)`)
+              : chalk.green(`      ${source}: ${verStr}`);
       }).join("\n");
       console.log(pkgUpdates)
     }

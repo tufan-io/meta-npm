@@ -28,11 +28,32 @@ const debug = require('debug')('meta-npm')
 // a bit dicey, but getMetaFile also assumes process.cwd(), so we'll let it be for now.
 const rootDir = process.cwd();
 
-if (process.argv[2] === '--help') {
-  return console.log(`\n  usage:\n\n    meta npm link-local\n`);
-} else {
-  main();
-}
+let targetModule = undefined;
+let destinationModules = undefined;
+
+const meow = require('meow');
+const cli = meow(`
+  usage:
+
+    meta npm link-local [--root] [--modules]
+
+  options:
+    --root     the parent module (links created here)
+    --modules  comma separated module-list (link destination(s))
+`, {
+  flags: {
+    root: {
+      type: 'string',
+    },
+    modules: {
+      type: 'string',
+    }
+  }
+});
+
+targetModule = cli.flags?.root ?? "__all__";
+destinationModules = cli.flags?.modules?.split(",") ?? undefined;
+main();
 
 
 function main() {
@@ -61,11 +82,16 @@ function main() {
   });
 
   const dependencies = getPackageDependencies(packages);
-  dependencies.sort((d1, d2) => d1.target < d2.target ? 0 : -1).forEach(({ targetFolder, source, sourceFolder }) => {
-    const tgt = `${targetFolder}/node_modules/${source}`;
-    const dst = sourceFolder
-    const state = createSymlink(tgt, dst);
-    console.log(`link: (${state}) ${slash(path.relative(process.cwd(), targetFolder))} (${source}) -> ${slash(path.relative(process.cwd(), dst))}`)
+  dependencies.sort((d1, d2) => d1.target < d2.target ? 0 : -1).forEach(({ target, targetFolder, source, sourceFolder }) => {
+    if ((targetModule === target && !destinationModules) ||
+      (targetModule === target && destinationModules.includes(source)) ||
+      (targetModule === "__all__" && destinationModules && destinationModules.includes(source)) ||
+      (targetModule === "__all__" && !destinationModules)) {
+      const tgt = `${targetFolder}/node_modules/${source}`;
+      const dst = sourceFolder
+      const state = createSymlink(tgt, dst);
+      console.log(`link: (${state}) ${slash(path.relative(process.cwd(), targetFolder))} (${source}) -> ${slash(path.relative(process.cwd(), dst))}`)
+    }
   })
 }
 
