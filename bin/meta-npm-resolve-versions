@@ -65,22 +65,49 @@ function main() {
     };
   });
 
+
   // get the dependencies
   const dependencies = getPackageDependencies(Object.values(packages));
-  debug(dependencies.map(({ pkgJson, ...dep }) => dep));
+  const unsortedDepIndices = dependencies.reduce((acc, dep, idx) => {
+
+    acc[dep.target] = idx;
+    return acc;
+  }, {});
+
+  const edges = dependencies.map(({ source, target }) => {
+    return [source, target]
+  })
+  const nodes = Object.keys(packages);
+  const sorted = toposort.array(nodes, edges).filter((n) => !!n);
+  const sortedDepIndices = sorted.reduce((acc, name, idx) => {
+    acc[name] = idx;
+    return acc;
+  }, {})
+  const sortedDependencies = dependencies.sort((dep1, dep2) => {
+    const idx1 = sortedDepIndices[dep1.source];
+    const idx2 = sortedDepIndices[dep2.source];
+    const diff = idx1 - idx2;
+    return diff === 0 ? diff : diff / Math.abs(diff);
+  })
+
+
+  debug(sortedDependencies.map(({ pkgJson, ...dep }) => dep));
   // update linked versions
   const updates = {};
-  dependencies.forEach((dep) => {
+  sortedDependencies.forEach((dep) => {
     const { source, target, nextVersion: _nextVersion, currVersion: _currVersion, dev, transitive } = dep;
     const { pkgJson, ...rest } = dep;
     const match = _currVersion.trim().match(/(<=|=|>=|\^|~)(.*)/);
     const comparator = match ? match[1] : '';
     const currVersion = match ? match[2] : _currVersion;
     if (currVersion[0].match(/[a-z]/)) {
-      if (!Object.keys(updates).includes(target)) {
-        updates[target] = [];
+      // this is a url/file based dependency - per the topological sort performed earlier, 
+      if (Object.keys(updates).includes(source)) {
+        if (!Object.keys(updates).includes(target)) {
+          updates[target] = [];
+        }
+        updates[target].push({ source, nextVersion: _nextVersion, currVersion: _currVersion, direction: "no-change" });
       }
-      updates[target].push({ source, nextVersion: _nextVersion, currVersion: _currVersion, direction: "no-change" });
       return;
     }
     const direction = semver.lt(currVersion, _nextVersion)
@@ -134,11 +161,6 @@ function main() {
   // let's do so in a topologically sorted order. If we traverse this list top to bottom,
   // it'll require the fewest loops.
 
-  const edges = dependencies.map(({ source, target }) => {
-    return [source, target]
-  })
-  const nodes = Object.keys(packages);
-  const sorted = toposort.array(nodes, edges).filter((n) => !!n);
 
   sorted.forEach((name, idx) => {
     const package = packages[name];
@@ -173,10 +195,9 @@ function main() {
     } else {
       console.log(chalk.red(`${idx}. ${chalk.underline(name)} ${chalk.dim(update)}`))
     }
-
     if (depUpdates) {
       const pkgJson = package.pkgJson;
-      fs.writeFileSync(`${folder}/package.json`, JSON.stringify(pkgJson, null, 2));
+      fs.writeFileSync(`${folder}/package.json`, `${JSON.stringify(pkgJson, null, 2)}\n`);
       const pkgUpdates = updates[name].map(({ source, nextVersion, currVersion, direction }) => {
         const verStr = chalk.dim(`${currVersion} -> ${nextVersion}`)
         return direction === 'upgrade'
