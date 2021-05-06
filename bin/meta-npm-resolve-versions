@@ -69,7 +69,6 @@ function main() {
   // get the dependencies
   const dependencies = getPackageDependencies(Object.values(packages));
   const unsortedDepIndices = dependencies.reduce((acc, dep, idx) => {
-
     acc[dep.target] = idx;
     return acc;
   }, {});
@@ -89,7 +88,6 @@ function main() {
     const diff = idx1 - idx2;
     return diff === 0 ? diff : diff / Math.abs(diff);
   })
-
 
   debug(sortedDependencies.map(({ pkgJson, ...dep }) => dep));
   // update linked versions
@@ -115,10 +113,12 @@ function main() {
       : semver.gt(currVersion, _nextVersion)
         ? "downgrade"
         : "no-change"
+
     // updates tracks the changes made, so we can provide feedback to the user.
     try {
-      if ((!transitive && _nextVersion !== currVersion) ||
-        !!dep.sourceFolder.match(/node_modules/)) {
+      if ((!transitive && _nextVersion !== currVersion)
+        // ||  !!dep.sourceFolder.match(/node_modules/)
+      ) {
         const nextVersion = `${comparator}${_nextVersion}`;
         if (dev) {
           packages[target].devDependencies[source] = nextVersion;
@@ -140,15 +140,15 @@ function main() {
         // now when we execute a status, we could be ahead or behind remote. 
         const status = cp.execSync("git status", execOptions);
         // there are local modifications, but the version hasn't yet been updated. 
-        const unversionedChanges = !!status.match(/Changes not staged for commit|Untracked files|Changes to be committed|Your branch is ahead of|Your branch is behind/);
-        if (unversionedChanges) {
-          // the version are still identical. We cannot devine the next version. It is something the
+        const unVersionedChanges = !!status.match(/Changes not staged for commit|Untracked files|Changes to be committed|Your branch is ahead of|Your branch is behind/);
+        if (unVersionedChanges) {
+          // the version are still identical. We cannot divine the next version. It is something the
           // developer has to commit. But we did detect changes - remote, local, committed or not.
           // This will impact dependents. So we'll track and provide feedback. 
           if (!Object.keys(updates).includes(target)) {
             updates[target] = [];
           }
-          updates[target].push({ source, nextVersion: currVersion, currVersion, direction: "unversioned" });
+          updates[target].push({ source, nextVersion: currVersion, currVersion, direction: "un-versioned" });
           return;
         }
       }
@@ -204,7 +204,7 @@ function main() {
           ? chalk.red(`      ${source}: ${verStr} ${chalk.dim(`(up)`)}`)
           : direction === 'downgrade'
             ? chalk.redBright(`      ${source}: ${verStr} ${chalk.dim(`(down)`)}`)
-            : direction === "unversioned"
+            : direction === "un-versioned"
               ? chalk.magenta(`      ${source}: ${verStr} (pending new version)`)
               : chalk.green(`      ${source}: ${verStr}`);
       }).join("\n");
